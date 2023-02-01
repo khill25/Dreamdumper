@@ -14,14 +14,21 @@
 #define DEBUG_PRINT_RAW_READ_DATA 0
 
 #define LATCH_DELAY_MULTIPLYER 1
-#define LATCH_DELAY_US 4 * LATCH_DELAY_MULTIPLYER // Used for reads
+#define LATCH_DELAY_US 2 * LATCH_DELAY_MULTIPLYER // Used for reads
 #define LATCH_DELAY_NS (110 / 7) * LATCH_DELAY_MULTIPLYER // Used for sending addresses. 133mhz is 7.5NS, let's just use int math though
+#define READ_LATCH_PULSE_NS (600 / 7)
 
 #define CART_ADDRESS_START (0x10000000)
 #define CART_ADDRESS_UPPER_RANGE (0x1FBFFFFF)
 
 uint32_t finalReadAddress = (CART_ADDRESS_START + (12 * 1024 * 1024)); // goldeneye is a 12 megabyte cart
 uint32_t address_pin_mask = 0;
+
+static inline uint16_t swap8(uint16_t value)
+{
+	// 0x1122 => 0x2211
+	return (value << 8) | (value >> 8);
+}
 
 void set_ad_input() {
     for(int i = 0; i < 16; i++) {
@@ -40,13 +47,17 @@ void set_ad_output() {
 }
 
 void dump_rom_test() {
+
     gpio_put(PICO_DEFAULT_LED_PIN, false);
+    // Disable carriage returns, this setting was added in extra 0x0D bytes between 0x3C and 0x0A
+    stdio_set_translate_crlf(&stdio_usb, false);
 
     // Start sending addresses and getting data
     gpio_put(N64_COLD_RESET, true);
 
     uint32_t buf_start_address = CART_ADDRESS_START;    
     uint32_t address = CART_ADDRESS_START; // Starting address
+    int bytesInBuffer = 0;
     int addressIncrement = 2;
     while(1) {
         gpio_put(PICO_DEFAULT_LED_PIN, true);
@@ -57,23 +68,30 @@ void dump_rom_test() {
         // Send address, sends high 16 for LATCH_DELAY_US, sends low 16
         send_address(address);
         
-        // Read data
-        // volatile uint32_t data = read32();
-        volatile uint16_t data = read16();
+        for (int i = 0; i < 2; i ++) {
+            // Read data
+            // volatile uint32_t data = read32();
+            volatile uint16_t data = swap8(read16());
+
+            // Write out the data
+            fwrite(&data, 1, 2, stdout);
+            bytesInBuffer+=2;
+
+            if (bytesInBuffer > 32) {
+                bytesInBuffer = 0;
+                fflush(stdout);
+            }
+            // putchar(data >> 8);
+            // putchar(data);
+            
+            address += addressIncrement; // increment address by 2 bytes
+            busy_wait_at_least_cycles(READ_LATCH_PULSE_NS);
+        }
 
         // Make sure that the cart is held in a waiting patter until we verify the data
         gpio_put(N64_READ, true);
         gpio_put(N64_ALEH, true);
         gpio_put(N64_ALEL, true);
-
-        // verify_data(data, address);
-        // printf("[%08x] %04x\n", address, data);
-        printf("%04x ", data);
-        
-        address += addressIncrement; // increment address by 2 bytes
-
-        // Delay to make sure USB prints all the data. If it goes too fast sometimes it won't print properly.
-        sleep_ms(10);
 
         // make sure we don't go out of bounds
         if (address > finalReadAddress) {
@@ -83,6 +101,9 @@ void dump_rom_test() {
         gpio_put(PICO_DEFAULT_LED_PIN, false);
     }
 
+    // Flush again in case we have left over data
+    fflush(stdout);
+
     gpio_clr_mask(address_pin_mask);
     gpio_put(PICO_DEFAULT_LED_PIN, true);
     gpio_put(N64_COLD_RESET, false); // roms won't read until this is true
@@ -91,7 +112,7 @@ void dump_rom_test() {
     // Blink when finished then turns off the led
     int numBlinks = 0;
     while(1) {
-        if(numBlinks < 20) {
+        if(numBlinks < 10) {
             gpio_put(PICO_DEFAULT_LED_PIN, true);
             sleep_ms(150);
             gpio_put(PICO_DEFAULT_LED_PIN, false);
@@ -192,14 +213,25 @@ void main() {
      */
 
     stdio_init_all();
+    
+
+    gpio_init(23); // GPIO 23 on the weact board is connected to a switch
+    gpio_set_dir(23, GPIO_IN);
 
     // Setup the LED pin
     gpio_init(PICO_DEFAULT_LED_PIN);
     gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
     
+    gpio_put(PICO_DEFAULT_LED_PIN, true);
+
+    // Wait for the key press
+    while(gpio_get(23) == 0) {
+        tight_loop_contents();
+    }
+
     // Flash the led
     volatile int t = 0;
-    while(t < 3) {
+    while(t < 5) {
         gpio_put(PICO_DEFAULT_LED_PIN, true);
         sleep_ms(100);
         gpio_put(PICO_DEFAULT_LED_PIN, false);
@@ -208,8 +240,8 @@ void main() {
     }
 
     gpio_put(PICO_DEFAULT_LED_PIN, true);
-    printf("\n\nSetting up cart tester\n");
-    sleep_ms(500);
+    
+    sleep_ms(50);
 
     // setup data/address lines
     for (int i = 0; i < 16; i++) {
@@ -287,7 +319,8 @@ void send_address(uint32_t address) {
     // set aleL low to tell the cart we are done sending the address
     gpio_put(N64_ALEL, false);
 
-    busy_wait_at_least_cycles(40); // wait ~600ns
+    // busy_wait_at_least_cycles(40); // wait ~600ns
+    sleep_us(LATCH_DELAY_US); // wait at least 1us always before pulling read low
 
     // clear the mask so there is nothing on the lines
     gpio_clr_mask(address_pin_mask);
