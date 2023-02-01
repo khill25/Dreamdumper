@@ -17,10 +17,10 @@
 #define LATCH_DELAY_US 4 * LATCH_DELAY_MULTIPLYER // Used for reads
 #define LATCH_DELAY_NS (110 / 7) * LATCH_DELAY_MULTIPLYER // Used for sending addresses. 133mhz is 7.5NS, let's just use int math though
 
-#define CART_ADDRESS_START (0x10000000 + 24 * 1024 * 1024)
-#define CART_ADDRESS_UPPER_RANGE 0x1FBFFFFF
+#define CART_ADDRESS_START (0x10000000)
+#define CART_ADDRESS_UPPER_RANGE (0x1FBFFFFF)
 
-uint32_t finalReadAddress = CART_ADDRESS_START + 0x16; //0x200000;
+uint32_t finalReadAddress = (CART_ADDRESS_START + (12 * 1024 * 1024)); // goldeneye is a 12 megabyte cart
 uint32_t address_pin_mask = 0;
 
 void set_ad_input() {
@@ -40,10 +40,6 @@ void set_ad_output() {
 }
 
 void dump_rom_test() {
-    sleep_ms(100);
-    printf("\nDUMP READ TEST START\n");
-    sleep_ms(300);
-
     gpio_put(PICO_DEFAULT_LED_PIN, false);
 
     // Start sending addresses and getting data
@@ -71,13 +67,13 @@ void dump_rom_test() {
         gpio_put(N64_ALEL, true);
 
         // verify_data(data, address);
-        // printf("[%08x] %08x\n", address, data);
-        printf("[%08x] %04x\n", address, data);
+        // printf("[%08x] %04x\n", address, data);
+        printf("%04x ", data);
         
         address += addressIncrement; // increment address by 2 bytes
 
         // Delay to make sure USB prints all the data. If it goes too fast sometimes it won't print properly.
-        sleep_ms(100);
+        sleep_ms(10);
 
         // make sure we don't go out of bounds
         if (address > finalReadAddress) {
@@ -87,15 +83,21 @@ void dump_rom_test() {
         gpio_put(PICO_DEFAULT_LED_PIN, false);
     }
 
-    printf("END\n");
-
     gpio_clr_mask(address_pin_mask);
     gpio_put(PICO_DEFAULT_LED_PIN, true);
     gpio_put(N64_COLD_RESET, false); // roms won't read until this is true
     gpio_put(PICO_DEFAULT_LED_PIN, true);
 
+    // Blink when finished then turns off the led
+    int numBlinks = 0;
     while(1) {
-        tight_loop_contents();
+        if(numBlinks < 20) {
+            gpio_put(PICO_DEFAULT_LED_PIN, true);
+            sleep_ms(150);
+            gpio_put(PICO_DEFAULT_LED_PIN, false);
+            sleep_ms(150);
+            numBlinks++;
+        }
     }
 }
 

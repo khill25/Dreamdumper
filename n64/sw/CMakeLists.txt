@@ -6,7 +6,7 @@ include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 # Build as release but with debug symbols
 set(CMAKE_BUILD_TYPE Debug)
 
-project(cart_tester C CXX ASM)
+project(dreamdumper64 C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
